@@ -1,0 +1,14 @@
+{
+  "name": "pocket-dungeon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pocket Dungeon RPG",
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0"
+  }
+}
