@@ -148,13 +148,37 @@
         <!-- 2. HEROES / PARTY TAB -->
         <section id="tab-heroes" class="space-y-4 hidden">
             <div class="flex justify-between items-center">
-                <h2 class="text-sm font-extrabold text-slate-200 uppercase tracking-wide">Heroes Roster</h2>
+                <h2 class="text-sm font-extrabold text-slate-200 uppercase tracking-wide">Heroes (<span id="hero-count">0</span>)</h2>
                 <span id="party-limit-text" class="text-xs text-slate-400">Max 3 Active in Party</span>
             </div>
 
-            <!-- Hero List Grid -->
-            <div id="heroes-list" class="space-y-3">
-                <!-- Dynamically populated -->
+            <!-- Hero toolbar + boxes -->
+            <div class="flex gap-2">
+                <select id="hero-sort" onchange="setHeroSort(this.value)" class="flex-1 bg-slate-900 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5">
+                    <option value="levelDesc">Sort: Level (high)</option>
+                    <option value="levelAsc">Sort: Level (low)</option>
+                    <option value="rarityDesc">Sort: Rarity (high)</option>
+                    <option value="rarityAsc">Sort: Rarity (low)</option>
+                    <option value="evoDesc">Sort: Evolution</option>
+                    <option value="position">Sort: Position</option>
+                    <option value="partyFirst">Sort: Party first</option>
+                    <option value="hpDesc">Sort: HP</option>
+                    <option value="atkDesc">Sort: ATK</option>
+                    <option value="defDesc">Sort: DEF</option>
+                    <option value="newest">Sort: Newest</option>
+                    <option value="nameAsc">Sort: Name (A-Z)</option>
+                </select>
+                <select id="hero-filter" onchange="setHeroFilter(this.value)" class="flex-1 bg-slate-900 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5">
+                    <option value="all">All heroes</option>
+                    <option value="party">In party</option>
+                    <option value="reserve">Reserve</option>
+                    <option value="defensive">Defenders</option>
+                    <option value="offensive">Strikers</option>
+                    <option value="support">Supports</option>
+                </select>
+            </div>
+            <div id="heroes-list" class="grid grid-cols-2 gap-2">
+                <!-- Dynamically populated hero boxes -->
             </div>
         </section>
 
@@ -211,6 +235,8 @@
                         <option value="rarityDesc">Sort: Rarity (high)</option>
                         <option value="rarityAsc">Sort: Rarity (low)</option>
                         <option value="type">Sort: Type</option>
+                        <option value="zoneDesc">Sort: Zone (high)</option>
+                        <option value="zoneAsc">Sort: Zone (low)</option>
                     </select>
                     <select id="inv-filter" onchange="setInvFilter(this.value)" class="flex-1 bg-slate-900 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5">
                         <option value="all">All types</option>
@@ -219,6 +245,9 @@
                         <option value="armor">Armor</option>
                     </select>
                 </div>
+                <select id="inv-zone" onchange="setInvZone(this.value)" class="w-full bg-slate-900 border border-slate-800 text-[11px] text-slate-300 rounded-lg px-2 py-1.5">
+                    <option value="all">All zones</option>
+                </select>
                 <div id="inventory-grid" class="grid grid-cols-2 gap-2">
                     <!-- Dynamic inventory items -->
                 </div>
@@ -281,6 +310,7 @@
                 <h2 class="text-sm font-extrabold text-slate-200 uppercase tracking-wide">Gem Bounties & Quests</h2>
                 <span class="text-xs text-cyan-400 font-bold"><i class="fa-solid fa-clock mr-1"></i>New in <span id="quest-timer">10:00</span></span>
             </div>
+            <button onclick="rerollQuests()" class="w-full py-2 bg-cyan-700/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs rounded-lg"><i class="fa-solid fa-dice mr-1"></i>Reroll Quests (1 <i class="fa-solid fa-gem"></i>)</button>
             <div id="quests-list" class="space-y-2">
                 <!-- Dynamic quests -->
             </div>
@@ -360,7 +390,12 @@
     </div>
 
     <!-- JAVASCRIPT LOGIC -->
-    <!-- In-game confirm / info dialog -->
+    <!-- Hero detail -->
+<div id="hero-modal" onclick="if (event.target === this) closeHeroModal()" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div id="hero-modal-body" class="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-xs space-y-3"></div>
+</div>
+
+<!-- In-game confirm / info dialog -->
 <div id="confirm-modal" class="hidden fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-6">
     <div class="bg-slate-900 border border-slate-700 rounded-2xl p-4 max-w-xs w-full space-y-3">
         <div id="confirm-text" class="text-xs text-slate-200 leading-relaxed"></div>
@@ -1081,6 +1116,24 @@
             updateUI();
         }
 
+        // Costs 1 gem: new quests with fresh progress. The refresh timer keeps running as it was.
+        function rerollQuests() {
+            if (player.gems < 1) { showToast('You need 1 gem to reroll.'); return; }
+            const doReroll = () => {
+                const timer = player.questRefreshAt;
+                player.gems -= 1;
+                generateQuests();
+                player.questRefreshAt = timer;
+                showToast('Quests rerolled!');
+                updateUI();
+            };
+            if (player.quests.some(q => q.current >= q.target && !q.claimed)) {
+                askConfirm('You have finished quests you have not claimed yet. Rerolling will lose them. Reroll anyway?', doReroll, { yes: 'Reroll' });
+            } else {
+                doReroll();
+            }
+        }
+
         function questTick() {
             const left = player.questRefreshAt - Date.now();
             if (left <= 0) {
@@ -1336,7 +1389,7 @@
             const activeHeroes = player.party.filter(h => h.inParty);
             document.getElementById('party-count').innerText = activeHeroes.length;
             document.getElementById('party-max').innerText = partyLimit();
-            document.getElementById('party-limit-text').innerText = `Max ${partyLimit()} Active in Party`;
+            document.getElementById('party-limit-text').innerText = `In party: ${activeHeroes.length} / ${partyLimit()}`;
             document.getElementById('team-dps').innerText = `Team ATK: ${team.atk}`;
             document.getElementById('heal-rate').innerText = `(+${(getHealPct() * 100).toFixed(1)}% per fight)`;
             document.getElementById('player-hp-text').innerText = `${player.currentHp} / ${team.maxHp}`;
@@ -1424,20 +1477,23 @@
             });
         }
 
-        let selectMode = false, invSort = 'newest', invFilter = 'all', invKey = '';
+        let selectMode = false, invSort = 'newest', invFilter = 'all', invZone = 'all', invKey = '';
         const selectedIds = new Set();
 
         function getVisibleInventory() {
-            let list = player.inventory.filter(i => invFilter === 'all' || i.type === invFilter);
+            let list = player.inventory.filter(i => (invFilter === 'all' || i.type === invFilter) && (invZone === 'all' || (i.zone || 1) === Number(invZone)));
             const tier = i => rarityOf(i).tier;
             if (invSort === 'newest') list = list.slice().reverse();
             else if (invSort === 'rarityDesc') list = list.slice().sort((a, b) => tier(b) - tier(a) || (b.upgradeLevel || 0) - (a.upgradeLevel || 0));
             else if (invSort === 'rarityAsc') list = list.slice().sort((a, b) => tier(a) - tier(b) || (a.upgradeLevel || 0) - (b.upgradeLevel || 0));
+            else if (invSort === 'zoneDesc') list = list.slice().sort((a, b) => (b.zone || 1) - (a.zone || 1) || tier(b) - tier(a) || (b.upgradeLevel || 0) - (a.upgradeLevel || 0));
+            else if (invSort === 'zoneAsc') list = list.slice().sort((a, b) => (a.zone || 1) - (b.zone || 1) || tier(b) - tier(a));
             else if (invSort === 'type') list = list.slice().sort((a, b) => a.type.localeCompare(b.type) || tier(b) - tier(a));
             return list;
         }
 
         function setInvSort(v) { invSort = v; renderInventoryGrid(true); }
+        function setInvZone(v) { invZone = v; renderInventoryGrid(true); }
         function setInvFilter(v) { invFilter = v; renderInventoryGrid(true); }
         function toggleSelectMode() { selectMode = !selectMode; selectedIds.clear(); renderInventoryGrid(true); }
         function cancelSelect() { selectMode = false; selectedIds.clear(); renderInventoryGrid(true); }
@@ -1478,9 +1534,15 @@
 
         function renderInventoryGrid(force) {
             selectedIds.forEach(id => { if (!player.inventory.some(i => i.id === id)) selectedIds.delete(id); });
-            const key = JSON.stringify([player.inventory.map(i => [i.id, i.upgradeLevel || 0]), [...selectedIds], selectMode, invSort, invFilter]);
+            // zone filter lists the zones your backpack actually contains (highest first)
+            const zonesHeld = [...new Set(player.inventory.map(i => i.zone || 1))].sort((a, b) => b - a);
+            if (invZone !== 'all' && !zonesHeld.includes(Number(invZone))) invZone = 'all';
+            const key = JSON.stringify([player.inventory.map(i => [i.id, i.upgradeLevel || 0]), [...selectedIds], selectMode, invSort, invFilter, invZone]);
             if (!force && key === invKey) return;
             invKey = key;
+            const zoneSel = document.getElementById('inv-zone');
+            zoneSel.innerHTML = '<option value="all">All zones</option>' + zonesHeld.map((z, idx) => `<option value="${z}">Zone ${z}${idx === 0 ? ' (highest)' : ''}</option>`).join('');
+            zoneSel.value = invZone;
 
             document.getElementById('inv-count').innerText = player.inventory.length;
             const modeBtn = document.getElementById('btn-select-mode');
@@ -1528,43 +1590,116 @@
             });
         }
 
-        let heroesKey = '';
-        function renderHeroesList() {
-            const key = JSON.stringify([partyLimit(), player.party.map(h => [h.id, h.name, h.level, h.evoLevel, h.inParty, h.rarity, getHeroStats(h)])]);
-            if (key === heroesKey) return;
-            heroesKey = key;
-            const list = document.getElementById('heroes-list');
-            list.innerHTML = '';
-            player.party.forEach(hero => {
-                const arch = heroArchetypes[hero.type];
-                const st = getHeroStats(hero);
-                const el = document.createElement('div');
-                el.className = "bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2";
-                el.innerHTML = `
-                    <div class="flex justify-between items-center">
-                        <div class="flex items-center gap-2">
-                            <i class="fa-solid ${arch.icon} text-base" style="color:${arch.color}"></i>
-                            <div>
-                                <span class="text-xs font-extrabold" style="color:${heroRarity(hero).color}">${hero.name}</span>
-                                <span class="text-[10px] text-slate-400 ml-1">(${heroRarity(hero).label} ${arch.name} - Evo ${hero.evoLevel})</span>
-                            </div>
-                        </div>
-                        <span class="text-xs font-mono font-bold text-amber-400">Lvl ${hero.level} / ${hero.maxLevel}</span>
-                    </div>
-                    <div class="text-[10px] text-slate-400 font-mono grid grid-cols-3 gap-1 bg-slate-950 p-2 rounded-lg">
-                        <span>HP: ${st.maxHp}</span>
-                        <span>ATK: ${st.atk}</span>
-                        <span>DEF: ${st.def}</span>
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="togglePartyMember(${hero.id})" class="flex-1 py-1.5 ${hero.inParty ? 'bg-rose-600/20 border-rose-500/40 text-rose-300' : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'} border text-xs font-bold rounded-lg">
-                            ${hero.inParty ? 'Remove from Party' : 'Add to Party'}
-                        </button>
-                        <button onclick="releaseHero(${hero.id})" class="shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg ${player.party.length > 1 ? 'border-slate-600 text-slate-300' : 'border-slate-800 text-slate-600'}"><i class="fa-solid fa-trash-can mr-1"></i>Release</button>
-                    </div>
-                `;
-                list.appendChild(el);
+        let heroesKey = '', heroSort = 'levelDesc', heroFilter = 'all', heroModalId = null;
+        const POS_ORDER = { defensive: 0, offensive: 1, support: 2 };
+        const fmtC = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : String(Math.floor(n));
+
+        function setHeroSort(v) { heroSort = v; renderHeroesList(); }
+        function setHeroFilter(v) { heroFilter = v; renderHeroesList(); }
+
+        function getVisibleHeroes() {
+            let list = player.party.filter(h => {
+                if (heroFilter === 'party') return h.inParty;
+                if (heroFilter === 'reserve') return !h.inParty;
+                if (heroFilter === 'all') return true;
+                return h.type === heroFilter;
             });
+            const keys = {
+                levelDesc: h => -h.level, levelAsc: h => h.level,
+                rarityDesc: h => -(h.rarity || 0), rarityAsc: h => (h.rarity || 0),
+                evoDesc: h => -h.evoLevel, position: h => POS_ORDER[h.type],
+                partyFirst: h => h.inParty ? 0 : 1,
+                hpDesc: h => -getHeroStats(h).maxHp, atkDesc: h => -getHeroStats(h).atk, defDesc: h => -getHeroStats(h).def,
+                newest: h => -h.id
+            };
+            list = list.slice().sort((a, b) => {
+                if (heroSort === 'nameAsc') return a.name.localeCompare(b.name);
+                const k = keys[heroSort] || keys.levelDesc;
+                return (k(a) - k(b)) || ((b.rarity || 0) - (a.rarity || 0)) || (b.level - a.level) || (b.evoLevel - a.evoLevel) || a.name.localeCompare(b.name);
+            });
+            return list;
+        }
+
+        function updateHeroExpBars() {
+            const byId = new Map(player.party.map(h => [String(h.id), h]));
+            document.querySelectorAll('.hexp-bar').forEach(el => {
+                const h = byId.get(el.dataset.id);
+                if (h) el.style.width = Math.min(100, (h.exp / h.maxExp) * 100) + '%';
+            });
+        }
+
+        function renderHeroesList() {
+            const key = JSON.stringify([heroSort, heroFilter, partyLimit(), player.party.map(h => [h.id, h.name, h.level, h.evoLevel, h.inParty, h.rarity, getHeroStats(h)])]);
+            if (key !== heroesKey) {
+                heroesKey = key;
+                document.getElementById('hero-count').innerText = player.party.length;
+                const list = document.getElementById('heroes-list');
+                list.innerHTML = '';
+                const heroes = getVisibleHeroes();
+                if (!heroes.length) {
+                    list.innerHTML = '<div class="col-span-2 text-center text-[11px] text-slate-600 py-6">No heroes match.</div>';
+                }
+                heroes.forEach(hero => {
+                    const arch = heroArchetypes[hero.type], r = heroRarity(hero), st = getHeroStats(hero);
+                    const el = document.createElement('div');
+                    el.className = `bg-slate-900 border rounded-xl p-2.5 space-y-1.5 cursor-pointer ${hero.inParty ? 'ring-2 ring-emerald-500/50' : ''}`;
+                    el.style.borderColor = r.color + '66';
+                    el.onclick = () => openHeroModal(hero.id);
+                    el.innerHTML = `
+                        <div class="flex items-center justify-between gap-1">
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                <i class="fa-solid ${arch.icon} text-xs" style="color:${arch.color}"></i>
+                                <span class="text-xs font-extrabold truncate" style="color:${r.color}">${hero.name}</span>
+                            </div>
+                            ${hero.inParty ? '<span class="text-[8px] font-bold text-emerald-400 border border-emerald-500/40 rounded px-1">PARTY</span>' : ''}
+                        </div>
+                        <div class="text-[9px] font-mono text-slate-400">${arch.name} | <span style="color:${r.color}">${r.label}</span></div>
+                        <div class="flex justify-between text-[10px] font-mono">
+                            <span class="text-amber-400">Lv ${hero.level}/${hero.maxLevel}</span>
+                            <span class="text-fuchsia-300">Evo ${hero.evoLevel}</span>
+                        </div>
+                        <div class="w-full bg-slate-950 h-1 rounded-full overflow-hidden"><div class="hexp-bar h-full bg-emerald-500" data-id="${hero.id}" style="width:0%"></div></div>
+                        <div class="grid grid-cols-3 gap-1 text-[9px] font-mono bg-slate-950 rounded p-1 text-center text-slate-300">
+                            <span>HP ${fmtC(st.maxHp)}</span><span>ATK ${fmtC(st.atk)}</span><span>DEF ${fmtC(st.def)}</span>
+                        </div>`;
+                    list.appendChild(el);
+                });
+            }
+            updateHeroExpBars();
+        }
+
+        function openHeroModal(id) { heroModalId = id; renderHeroModal(); document.getElementById('hero-modal').classList.remove('hidden'); }
+        function closeHeroModal() { heroModalId = null; document.getElementById('hero-modal').classList.add('hidden'); }
+        function manageHeroGear(id) { player.gearHeroId = id; closeHeroModal(); switchTab('inventory'); }
+
+        function renderHeroModal() {
+            const hero = player.party.find(h => h.id === heroModalId);
+            if (!hero) { closeHeroModal(); return; }
+            const arch = heroArchetypes[hero.type], r = heroRarity(hero), st = getHeroStats(hero);
+            const gearCount = hero.equipped.weapons.concat([hero.equipped.helmet, hero.equipped.armor]).filter(Boolean).length;
+            const lastActive = hero.inParty && player.party.filter(h => h.inParty).length <= 1;
+            document.getElementById('hero-modal-body').innerHTML = `
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid ${arch.icon} text-xl" style="color:${arch.color}"></i>
+                    <div>
+                        <div class="text-sm font-extrabold" style="color:${r.color}">${hero.name}</div>
+                        <div class="text-[10px] font-mono text-slate-400">${arch.name} | ${r.label} | Evo ${hero.evoLevel}</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-[10px] font-mono text-slate-400 mb-1"><span>Level ${hero.level} / ${hero.maxLevel}</span><span>EXP ${fmtC(hero.exp)} / ${fmtC(hero.maxExp)}</span></div>
+                    <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800"><div class="h-full bg-emerald-500" style="width:${Math.min(100, hero.exp / hero.maxExp * 100)}%"></div></div>
+                </div>
+                <div class="grid grid-cols-3 gap-1 text-[11px] font-mono bg-slate-950 rounded-lg p-2 text-center text-slate-200">
+                    <span>HP<br><b>${fmtNum(st.maxHp)}</b></span><span>ATK<br><b>${fmtNum(st.atk)}</b></span><span>DEF<br><b>${fmtNum(st.def)}</b></span>
+                </div>
+                <div class="text-[10px] text-slate-400 font-mono">Gear: ${gearCount}/4 slots${hero.type === 'support' ? ' | Raises HP healed after fights' : ''}</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="togglePartyMember(${hero.id})" class="py-2 rounded-xl border text-xs font-bold ${hero.inParty ? 'bg-rose-600/20 border-rose-500/40 text-rose-300' : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'}">${hero.inParty ? 'Remove from Party' : 'Add to Party'}</button>
+                    <button onclick="manageHeroGear(${hero.id})" class="py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">Manage Gear</button>
+                    <button onclick="releaseHero(${hero.id})" class="py-2 rounded-xl border text-xs font-bold ${player.party.length > 1 ? 'border-slate-600 text-slate-300' : 'border-slate-800 text-slate-600'}"><i class="fa-solid fa-trash-can mr-1"></i>Release</button>
+                    <button onclick="closeHeroModal()" class="py-2 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold">Close</button>
+                </div>`;
         }
 
         function renderEvolutionTab() {
@@ -1620,6 +1755,7 @@
                 // never leave the party empty
                 if (!player.party.some(x => x.inParty)) player.party[0].inParty = true;
                 recalculateHealthOnStatChange();
+                closeHeroModal();
                 showToast(`Released ${h.name}`);
                 updateUI();
             };
@@ -1632,11 +1768,13 @@
             const hero = player.party.find(h => h.id === heroId);
             if (!hero) return;
             const activeCount = player.party.filter(h => h.inParty).length;
-            if (!hero.inParty && activeCount >= partyLimit()) return;
+            if (!hero.inParty && activeCount >= partyLimit()) { showToast(`Your party is full (${partyLimit()} max).`); return; }
+            if (hero.inParty && activeCount <= 1) { showToast('You need at least one hero in the party.'); return; }
             hero.inParty = !hero.inParty;
-            
+
             recalculateHealthOnStatChange();
             updateUI();
+            if (heroModalId === heroId) renderHeroModal();
         }
 
         function renderShop() {
