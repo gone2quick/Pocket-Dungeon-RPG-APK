@@ -222,6 +222,7 @@
                         Armor (Empty)
                     </div>
                 </div>
+                <button onclick="equipBest()" class="w-full mt-2 py-2 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 font-bold text-xs"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i>Equip Best from Backpack</button>
             </div>
 
             <!-- Backpack -->
@@ -270,7 +271,7 @@
                 </div>
             </div>
 
-            <div class="text-xs text-slate-400">Upgrade backpack or equipped gear with Ore and Gold. The price climbs with every upgrade and with rarity. Recycle spare gear in the Gear tab to get more Ore. Gear upgrades max out at +100, then the button becomes Evolve (1,500 Ore, 20 gems, 100,000 gold): +50% of base stats per evolution, and the upgrade level resets.</div>
+            <div class="text-xs text-slate-400">Upgrade backpack or equipped gear with Ore and Gold. The price climbs with every upgrade and with rarity. Recycle spare gear in the Gear tab to get more Ore. Gear gives a % of the equipped hero's own stats. Each upgrade adds +1% (more for rarer gear). Gear upgrades max out at +100, then the button becomes Evolve (1,500 Ore, 20 gems, 100,000 gold): +50% of base stats per evolution, and the upgrade level resets.</div>
             <div id="forge-list" class="space-y-2">
                 <!-- Items available for upgrading -->
             </div>
@@ -294,21 +295,10 @@
             </div>
 
             <!-- Exchange -->
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
-                <div class="flex justify-between items-center">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider"><i class="fa-solid fa-right-left mr-1"></i>Exchange</h3>
-                    <span class="text-[10px] text-slate-500 font-mono">500g = 1 Ore | 10,000g = 1 Gem</span>
-                </div>
-                <div class="text-[10px] text-slate-400">Pay with:</div>
-                <div id="exchange-from" class="grid grid-cols-3 gap-2"></div>
-                <div id="exchange-rows" class="space-y-2"></div>
-            </div>
-
-            <!-- Exchange -->
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-3">
                 <div class="flex justify-between items-center">
                     <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider"><i class="fa-solid fa-right-left mr-1.5 text-cyan-400"></i>Exchange</h3>
-                    <span class="text-[9px] font-mono text-slate-500">500g = 1 Ore | 10,000g = 1 Gem</span>
+                    <span id="ex-prices" class="text-[9px] font-mono text-slate-500"></span>
                 </div>
                 <div class="text-[10px] text-slate-400">Pay with:</div>
                 <div id="ex-pay" class="grid grid-cols-3 gap-2"></div>
@@ -482,6 +472,12 @@
             } else {
                 it.rarity = rarityDefs[it.rarity.tier] || rarityDefs[0];
             }
+            if (it.v !== 2) {   // older gear had flat stats: rebuild them as a % from type, rarity and zone
+                const key = it.type === 'weapons' ? 'atk' : it.type === 'helmet' ? 'maxHp' : 'def';
+                const basePct = it.type === 'weapons' ? (/Dagger/.test(it.name) ? 6 : 10) : 10;
+                it.stats = { [key]: Math.round(basePct * it.rarity.startMult * zoneStatMult(it.zone || 1) * 10) / 10 };
+                it.v = 2;
+            }
             return it;
         }
 
@@ -515,7 +511,7 @@
         ];
         const upgradeDefs = {
             loot: { name: 'Loot Bonus', desc: '+8% gold & drop chance per rank', icon: 'fa-sack-dollar', color: '#fbbf24', unlock: 1, max: 20, per: 0.08 },
-            heroExp: { name: 'Hero EXP Boost', desc: '+10% hero EXP per rank', icon: 'fa-book', color: '#34d399', unlock: 3, max: 20, per: 0.10 },
+            heroExp: { name: 'Hero EXP Boost', desc: '+10% hero EXP per rank', icon: 'fa-book', color: '#34d399', unlock: 3, max: Infinity, per: 0.10 },
             speed: { name: 'Battle Speed', desc: '+10% battle speed per rank', icon: 'fa-gauge-high', color: '#38bdf8', unlock: 4, max: 10, per: 0.10 }
         };
 
@@ -530,8 +526,8 @@
             lastActive: 0,
             wasRunning: false,
             offlineRate: { gold: 0, ore: 0, items: 0 },
-            stats: { kills: 0, playSec: 0, quests: 0, shopItems: 0, itemsObtained: 0, maxGold: 0 },
-            achievements: { kills: 0, playtime: 0, areas: 0, quests: 0, shop: 0, gold: 0 },
+            stats: { kills: 0, playSec: 0, quests: 0, shopItems: 0, itemsObtained: 0, rerolls: 0, upgrades: 0, maxGold: 0 },
+            achievements: { kills: 0, playtime: 0, areas: 0, quests: 0, shop: 0, gold: 0, impatience: 0, blacksmith: 0 },
             exp: 0,
             points: 0,
             upgrades: { loot: 0, heroExp: 0, speed: 0 },
@@ -607,14 +603,20 @@
             const lb = hero.level - 1;
             const evo = 1 + (hero.evoLevel * 0.5);
             const rm = heroRarity(hero).statMult;
-            let maxHp = Math.round((arch.hp + lb * 3) * evo * rm);
-            let atk = Math.round((arch.atk + lb * 0.6) * evo * rm);
-            let def = Math.round((arch.def + lb * 0.3) * evo * rm);
+            const baseHp = (arch.hp + lb * 3) * evo * rm;
+            const baseAtk = (arch.atk + lb * 0.6) * evo * rm;
+            const baseDef = (arch.def + lb * 0.3) * evo * rm;
+            // gear adds a % of the hero's own stat, all gear of the same stat adds together
             const g = hero.equipped;
-            g.weapons.forEach(w => { if (w && w.stats) atk += getItemStat(w, 'atk'); });
-            if (g.helmet && g.helmet.stats) maxHp += getItemStat(g.helmet, 'maxHp');
-            if (g.armor && g.armor.stats) def += getItemStat(g.armor, 'def');
-            return { maxHp, atk, def };
+            let atkPct = 0, hpPct = 0, defPct = 0;
+            g.weapons.forEach(w => { if (w && w.stats) atkPct += getItemStat(w, 'atk'); });
+            if (g.helmet && g.helmet.stats) hpPct += getItemStat(g.helmet, 'maxHp');
+            if (g.armor && g.armor.stats) defPct += getItemStat(g.armor, 'def');
+            return {
+                maxHp: Math.round(baseHp * (1 + hpPct / 100)),
+                atk: Math.round(baseAtk * (1 + atkPct / 100)),
+                def: Math.round(baseDef * (1 + defPct / 100))
+            };
         }
 
         function getTeamStats() {
@@ -632,17 +634,19 @@
             player.bestHeroLevel = Math.max(player.bestHeroLevel || 1, cur);
             return player.bestHeroLevel;
         }
-        // HP restored after each fight (as a share of party max HP). Base 2%; only active Support heroes add to it.
+        // HP restored after each fight (as a share of party max HP). Base 2%; only active Support heroes add to it. Maximum 10%.
         function getHealPct() {
             let pct = 0.02;
             player.party.filter(h => h.inParty && h.type === 'support').forEach(h => {
                 pct += (0.015 + 0.0005 * h.level) * (1 + 0.5 * h.evoLevel);
             });
-            return Math.min(1, pct);
+            return Math.min(0.1, pct);
         }
-        // Zone scaling: hero EXP grows 1.1x per zone; gear stats grow with the zone's monster level
-        function zoneExpMult(i) { return Math.pow(1.1, i); }
+        // Zone scaling: hero EXP grows 1.2x per zone; gear stats grow with the zone's monster level
+        function zoneExpMult(i) { return Math.pow(1.2, i); }
+        function zoneGoldMult(i) { return 1 + 0.25 * i; }
         function zoneGearMult(i) { const z = mapZones[Math.min(Math.max(i, 0), mapZones.length - 1)]; return 1 + (z.minLvl - 1) * 0.1; }
+        function zoneStatMult(zone) { return 1 + 0.05 * (zone - 1); }   // zone is 1-based; higher zones roll a higher starting %
         function zoneCost(item) { return 1 + 0.5 * ((item.zone || 1) - 1); }
         function unlockNextZone() {
             if (player.activeZoneIndex !== player.maxZoneIdx || player.maxZoneIdx >= mapZones.length - 1) return;
@@ -687,7 +691,7 @@
                 hp: hp,
                 maxHp: hp,
                 atk: atk,
-                goldReward: (5 + (eLvl * 3)) * (guardian ? 5 : 1),
+                goldReward: Math.round((5 + (eLvl * 3)) * (guardian ? 5 : 1) * zoneGoldMult(zIdx)),
                 expReward: (10 + (eLvl * 4)) * (guardian ? 3 : 1),
                 isGuardian: guardian
             };
@@ -863,16 +867,16 @@
 
         function generateRandomItem(zoneIdx = 0) {
             const types = [
-                { type: 'weapons', name: 'Shortsword', icon: 'fa-sword', stats: { atk: 3 } },
-                { type: 'weapons', name: 'Dagger', icon: 'fa-bolt', stats: { atk: 2 } },
-                { type: 'helmet', name: 'Cap', icon: 'fa-hat-wizard', stats: { maxHp: 10 } },
-                { type: 'armor', name: 'Tunic', icon: 'fa-shirt', stats: { def: 2 } }
+                { type: 'weapons', name: 'Shortsword', icon: 'fa-sword', stats: { atk: 10 } },
+                { type: 'weapons', name: 'Dagger', icon: 'fa-bolt', stats: { atk: 6 } },
+                { type: 'helmet', name: 'Cap', icon: 'fa-hat-wizard', stats: { maxHp: 10 } },   // starting % of the hero's stat
+                { type: 'armor', name: 'Tunic', icon: 'fa-shirt', stats: { def: 10 } }
             ];
             const base = types[Math.floor(Math.random() * types.length)];
             const rarity = rollRarity();
             const zMult = zoneGearMult(zoneIdx);
             const stats = {};
-            Object.keys(base.stats).forEach(k => { stats[k] = Math.max(1, Math.round(base.stats[k] * rarity.startMult * zMult)); });
+            Object.keys(base.stats).forEach(k => { stats[k] = Math.round(base.stats[k] * rarity.startMult * zoneStatMult(zoneIdx + 1) * 10) / 10; });
 
             return {
                 id: Date.now() + Math.random(),
@@ -883,6 +887,7 @@
                 zone: zoneIdx + 1,
                 zoneMult: zMult,
                 stats: stats,
+                v: 2,
                 value: Math.round(15 * rarity.costMult * zMult),
                 upgradeLevel: 0
             };
@@ -896,6 +901,7 @@
         function rerollShop() {
             if (player.gold < rerollCost) return;
             player.gold -= rerollCost;
+            player.stats.rerolls++;
             shopInventory = makeShopStock();
             updateUI();
         }
@@ -1007,6 +1013,31 @@
             });
         }
 
+        // Fills the selected hero's slots with the strongest backpack gear (weapons by ATK, helmets by HP, armor by DEF)
+        function equipBest() {
+            const hero = getGearHero();
+            if (!hero) return;
+            const eq = hero.equipped;
+            let changes = 0;
+            [{ type: 'weapons', stat: 'atk', n: 2 }, { type: 'helmet', stat: 'maxHp', n: 1 }, { type: 'armor', stat: 'def', n: 1 }].forEach(({ type, stat, n }) => {
+                const current = type === 'weapons' ? eq.weapons.filter(Boolean) : (eq[type] ? [eq[type]] : []);
+                const pool = current.concat(player.inventory.filter(i => i.type === type));   // current first, so ties keep what is worn
+                pool.sort((a, b) => getItemStat(b, stat) - getItemStat(a, stat));
+                const chosen = pool.slice(0, n);
+                if (chosen.length === current.length && chosen.every(c => current.includes(c))) return;
+                const chosenSet = new Set(chosen);
+                player.inventory = player.inventory.filter(i => !(i.type === type && chosenSet.has(i)));
+                current.forEach(c => { if (!chosenSet.has(c)) player.inventory.push(c); });
+                if (type === 'weapons') eq.weapons = [chosen[0] || null, chosen[1] || null];
+                else eq[type] = chosen[0] || null;
+                changes += chosen.filter(c => !current.includes(c)).length;
+            });
+            if (!changes) { showToast(`${hero.name} already has your best gear.`); return; }
+            recalculateHealthOnStatChange();
+            showToast(`Equipped ${changes} better item${changes === 1 ? '' : 's'} on ${hero.name}`);
+            updateUI();
+        }
+
         function unequipItem(slotType, index = null) {
             const hero = getGearHero();
             if (!hero) return;
@@ -1074,11 +1105,13 @@
         }
 
         /* ---- Player levels ---- */
+        const MAX_PLAYER_LEVEL = 100;
         function playerExpNeeded(l) { return Math.round(40 * Math.pow(l, 1.4)); }
 
         function addPlayerExp(n) {
+            if (player.level >= MAX_PLAYER_LEVEL) { player.exp = 0; return; }
             player.exp += n;
-            while (player.exp >= playerExpNeeded(player.level)) {
+            while (player.level < MAX_PLAYER_LEVEL && player.exp >= playerExpNeeded(player.level)) {
                 player.exp -= playerExpNeeded(player.level);
                 player.level++;
                 player.points++;
@@ -1086,6 +1119,7 @@
                 showToast(`Player Level ${player.level}!` + (f ? ` Unlocked: ${f}` : ' +1 point'));
                 logMessage(`Player reached Level ${player.level}!`);
             }
+            if (player.level >= MAX_PLAYER_LEVEL) player.exp = 0;
         }
 
         function buyUpgrade(key) {
@@ -1107,16 +1141,29 @@
             { tier: 'Hard', gems: 3, pct: 0.50 }
         ];
         const questTypes = {
-            kill: { text: n => `Defeat ${n} Enemies`, targets: [8, 15, 25] },
+            kill: { text: n => `Defeat ${fmtNum(n)} Enemies`, targets: [8, 15, 25] },
             level: { text: n => `Level up Heroes ${n} Times`, targets: [2, 3, 5] },
-            gold: { text: n => `Earn ${n} Gold`, targets: [80, 200, 400] }
+            gold: { text: n => `Earn ${fmtNum(n)} Gold`, targets: [10, 25, 50] }   // gold quests: number of average kills' worth of gold
         };
+
+        // Kill and gold quests grow with the highest zone you have unlocked
+        function avgGoldPerKill(zi) {
+            const z = mapZones[Math.min(zi, mapZones.length - 1)];
+            const lvl = z.minLvl + 0.31 * (z.maxLvl - z.minLvl);   // enemies lean toward the low end of a zone
+            return (5 + 3 * lvl) * zoneGoldMult(zi);
+        }
+        function questTarget(type, ti) {
+            const base = questTypes[type].targets[ti], zi = player.maxZoneIdx;
+            if (type === 'kill') return Math.round(base * (1 + 0.1 * zi));
+            if (type === 'gold') return Math.max(1, Math.round(base * avgGoldPerKill(zi)));
+            return base;
+        }
 
         function generateQuests() {
             player.quests = Object.keys(questTypes).map((type, i) => {
                 const ti = Math.floor(Math.random() * questTiers.length);
                 const tier = questTiers[ti];
-                const target = questTypes[type].targets[ti];
+                const target = questTarget(type, ti);
                 return {
                     id: Date.now() + i, type, target, current: 0, claimed: false,
                     text: questTypes[type].text(target),
@@ -1152,6 +1199,7 @@
             if (player.gems < 1) { showToast('You need 1 gem to reroll.'); return; }
             const doReroll = () => {
                 player.gems -= 1;
+                player.stats.rerolls++;
                 generateQuests();
                 showToast('Quests rerolled!');
                 updateUI();
@@ -1199,9 +1247,9 @@
                 if (!d.player || !d.player.party || d.player.party.length === 0) return false;
                 Object.assign(player, d.player);
                 player.upgrades = Object.assign({ loot: 0, heroExp: 0, speed: 0 }, d.player.upgrades);
-                player.stats = Object.assign({ kills: 0, playSec: 0, quests: 0, shopItems: 0, itemsObtained: 0, maxGold: 0 }, d.player.stats);
+                player.stats = Object.assign({ kills: 0, playSec: 0, quests: 0, shopItems: 0, itemsObtained: 0, rerolls: 0, upgrades: 0, maxGold: 0 }, d.player.stats);
                 if (!d.player.stats || d.player.stats.itemsObtained === undefined) player.stats.itemsObtained = player.stats.shopItems || 0;
-                player.achievements = Object.assign({ kills: 0, playtime: 0, areas: 0, quests: 0, shop: 0, gold: 0 }, d.player.achievements);
+                player.achievements = Object.assign({ kills: 0, playtime: 0, areas: 0, quests: 0, shop: 0, gold: 0, impatience: 0, blacksmith: 0 }, d.player.achievements);
                 heroIdCounter = d.heroIdCounter || (player.party.length + 1);
                 shopInventory = d.shopInventory || [];
                 rerollCost = d.rerollCost || 25;
@@ -1238,7 +1286,9 @@
             areas:    { name: 'Explorer',    icon: 'fa-map',        color: '#4ade80', desc: n => `Unlock ${n} areas`,                    target: t => AREA_TARGETS[t] ?? null,          value: () => player.maxZoneIdx + 1, show: fmtNum },
             quests:   { name: 'Questmaster', icon: 'fa-scroll',     color: '#a78bfa', desc: n => `Complete ${fmtNum(n)} quests`,         target: t => 5 * Math.pow(2, t),               value: () => player.stats.quests,          show: fmtNum },
             shop:     { name: 'Hoarder',     icon: 'fa-boxes-stacked', color: '#fb923c', desc: n => `Obtain ${fmtNum(n)} items from the shop & drops`, target: t => 10 * Math.pow(2, t), value: () => player.stats.itemsObtained, show: fmtNum },
-            gold:     { name: 'Tycoon',      icon: 'fa-sack-dollar', color: '#fbbf24', desc: n => `Hold ${fmtNum(n)} gold at once`,      target: t => 500 * Math.pow(3, t),             value: () => player.stats.maxGold,         show: fmtNum }
+            gold:     { name: 'Tycoon',      icon: 'fa-sack-dollar', color: '#fbbf24', desc: n => `Hold ${fmtNum(n)} gold at once`,      target: t => 500 * Math.pow(3, t),             value: () => player.stats.maxGold,         show: fmtNum },
+            impatience: { name: 'Impatience', icon: 'fa-hourglass-half', color: '#f472b6', desc: n => `Pay for ${fmtNum(n)} rerolls (shop & quests)`, target: t => 5 * Math.pow(2, t), value: () => player.stats.rerolls, show: fmtNum },
+            blacksmith: { name: 'Blacksmith', icon: 'fa-hammer', color: '#94a3b8', desc: n => `Upgrade gear ${fmtNum(n)} times`, target: t => 10 * Math.pow(2, t), value: () => player.stats.upgrades, show: fmtNum }
         };
         let achievementsOpen = false;
         let lastPlayTick = Date.now();
@@ -1319,7 +1369,7 @@
         /* ================= OFFLINE GAINS ================= */
         // While a run is active we track gold/ore/drops earned per second. When you leave or close the game,
         // coming back pays out 1/5 of what that rate would have made while you were away.
-        const OFFLINE_SHARE = 0.2;
+        const OFFLINE_SHARE = 1 / 3;
         const OFFLINE_MIN_SEC = 60;
         const BEAT_KEY = 'pocketDungeonBeat';
         // Written every second: when the game starts again, the gap since this timestamp is the time you were away
@@ -1354,70 +1404,8 @@
             player.materials += ore;
             for (let i = 0; i < n; i++) player.inventory.push(generateRandomItem(player.activeZoneIndex));
             player.stats.itemsObtained += n;
-            askConfirm(`<div class="text-sm font-bold mb-1">Welcome back!</div>You were away for ${fmtDur(sec)}.<br>Offline gains (${OFFLINE_SHARE * 100}% of normal): <b>+${fmtNum(gold)}g</b>, <b>+${fmtNum(ore)} Ore</b>, <b>+${n} item${n === 1 ? '' : 's'}</b>`, null, { single: true, yes: 'Nice!' });
+            askConfirm(`<div class="text-sm font-bold mb-1">Welcome back!</div>You were away for ${fmtDur(sec)}.<br>Offline gains (1/3 of normal): <b>+${fmtNum(gold)}g</b>, <b>+${fmtNum(ore)} Ore</b>, <b>+${n} item${n === 1 ? '' : 's'}</b>`, null, { single: true, yes: 'Nice!' });
             logMessage(`Offline gains: +${fmtNum(gold)}g, +${fmtNum(ore)} Ore, +${n} items`);
-        }
-
-        /* ================= EXCHANGE ================= */
-        // Pick what you pay with; the other two currencies are what you can buy. Gold <-> Ore <-> Gems, same rate both ways.
-        const XCUR = {
-            gold: { name: 'Gold', icon: 'fa-coins',  color: '#fbbf24', prop: 'gold',      val: 1 },
-            ore:  { name: 'Ore',  icon: 'fa-hammer', color: '#fb923c', prop: 'materials', val: 500 },
-            gems: { name: 'Gems', icon: 'fa-gem',    color: '#22d3ee', prop: 'gems',      val: 10000 }
-        };
-        let exchangeFrom = 'gold', exchangeBuilt = '';
-        function gcd(a, b) { return b ? gcd(b, a % b) : a; }
-        // Smallest whole trade: pay P of `from` to get G of `to`
-        function exStep(from, to) { const g = gcd(XCUR[from].val, XCUR[to].val); return { P: XCUR[to].val / g, G: XCUR[from].val / g }; }
-        function setExchangeFrom(c) { exchangeFrom = c; renderExchange(); }
-
-        function doExchange(from, to, t) {
-            const { P, G } = exStep(from, to);
-            const have = player[XCUR[from].prop];
-            const n = t === 'max' ? Math.floor(have / P) : parseInt(t, 10);
-            if (!(n >= 1) || have < P * n) return;
-            player[XCUR[from].prop] -= P * n;
-            player[XCUR[to].prop] += G * n;
-            showToast(`Exchanged ${fmtNum(P * n)} ${XCUR[from].name} for ${fmtNum(G * n)} ${XCUR[to].name}`);
-            updateUI();
-        }
-
-        function renderExchange() {
-            const rows = document.getElementById('exchange-rows');
-            if (!rows) return;
-            if (exchangeBuilt !== exchangeFrom) {
-                exchangeBuilt = exchangeFrom;
-                document.getElementById('exchange-from').innerHTML = Object.keys(XCUR).map(k => {
-                    const c = XCUR[k], on = k === exchangeFrom;
-                    return `<button onclick="setExchangeFrom('${k}')" class="py-2 rounded-xl border text-[11px] font-bold ${on ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-400'}">
-                        <i class="fa-solid ${c.icon}" style="color:${c.color}"></i> ${c.name}<br><span id="xhave-${k}" class="font-mono text-[10px]"></span></button>`;
-                }).join('');
-                rows.innerHTML = Object.keys(XCUR).filter(k => k !== exchangeFrom).map(to => {
-                    const c = XCUR[to], { P, G } = exStep(exchangeFrom, to);
-                    return `<div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-2">
-                        <div class="flex justify-between items-center">
-                            <div class="text-xs font-bold" style="color:${c.color}"><i class="fa-solid ${c.icon} mr-1"></i>Get ${c.name}</div>
-                            <div class="text-[10px] font-mono text-slate-400">${fmtNum(P)} ${XCUR[exchangeFrom].name} = ${fmtNum(G)} ${c.name}</div>
-                        </div>
-                        <div class="grid grid-cols-4 gap-1.5">
-                            ${[1, 10, 100, 'max'].map(t => `<button class="xbtn py-1.5 rounded-lg text-[10px] font-bold" data-to="${to}" data-t="${t}" onclick="doExchange('${exchangeFrom}','${to}','${t}')"></button>`).join('')}
-                        </div>
-                    </div>`;
-                }).join('');
-            }
-            // numbers and button states update in place so taps are never interrupted by a redraw
-            Object.keys(XCUR).forEach(k => {
-                const el = document.getElementById('xhave-' + k);
-                if (el) el.innerText = player.devMode ? '\u221e' : fmtC(player[XCUR[k].prop]);
-            });
-            const have = player[XCUR[exchangeFrom].prop];
-            rows.querySelectorAll('.xbtn').forEach(b => {
-                const to = b.dataset.to, t = b.dataset.t, { P, G } = exStep(exchangeFrom, to);
-                const n = t === 'max' ? Math.floor(have / P) : parseInt(t, 10);
-                const ok = n >= 1 && have >= P * n;
-                b.innerText = t === 'max' ? `Max (+${fmtC(G * Math.max(0, n))})` : `+${fmtC(G * n)}`;
-                b.className = `xbtn py-1.5 rounded-lg text-[10px] font-bold ${ok ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-500'}`;
-            });
         }
 
         /* ================= SECRET DEV MODE ================= */
@@ -1456,19 +1444,23 @@
         }
 
         /* ================= EXCHANGE ================= */
-        // Gold is worth 1, Ore 500, Gems 10,000. Pick what you pay with, then buy either of the other two.
+        // Pick what you pay with, then buy either of the other two. Same price both ways.
         const CUR = {
-            gold: { key: 'gold', label: 'Gold', icon: 'fa-coins', color: '#fbbf24', val: 1 },
-            ore:  { key: 'materials', label: 'Ore', icon: 'fa-cubes', color: '#fb923c', val: 500 },
-            gems: { key: 'gems', label: 'Gems', icon: 'fa-gem', color: '#22d3ee', val: 10000 }
+            gold: { key: 'gold', label: 'Gold', icon: 'fa-coins', color: '#fbbf24' },
+            ore:  { key: 'materials', label: 'Ore', icon: 'fa-cubes', color: '#fb923c' },
+            gems: { key: 'gems', label: 'Gems', icon: 'fa-gem', color: '#22d3ee' }
         };
+        function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+        // Prices (in gold) grow with the highest zone you have unlocked. A gem is always 625 Ore.
+        function orePrice() { return Math.max(1, Math.round(2 * zoneGearMult(player.maxZoneIdx))); }
+        function exPrice(c) { return c === 'gold' ? 1 : c === 'ore' ? orePrice() : orePrice() * 625; }
         let exPay = 'gold', exBuilt = false;
         const exQty = {};
 
         // One trade: pay `pay` of the paying currency, receive `get` of the target. Always whole numbers.
         function exRate(pay, target) {
-            const vp = CUR[pay].val, vt = CUR[target].val;
-            return vt >= vp ? { pay: vt / vp, get: 1 } : { pay: 1, get: vp / vt };
+            const p = exPrice(pay), t = exPrice(target), g = gcd(p, t);
+            return { pay: t / g, get: p / g };
         }
         function exTargets() { return Object.keys(CUR).filter(c => c !== exPay); }
         function exGetQty(t) { return exQty[exPay + '>' + t] || 1; }
@@ -1527,6 +1519,8 @@
 
         function updateExchange() {
             if (!exBuilt) { buildExchange(); return; }
+            const pr = document.getElementById('ex-prices');
+            if (pr) pr.innerText = `1 Ore = ${fmtNum(exPrice('ore'))}g | 1 Gem = ${fmtNum(exPrice('gems'))}g`;
             Object.keys(CUR).forEach(c => {
                 const el = document.getElementById('ex-own-' + c);
                 if (el) el.innerText = player.devMode ? '\u221e' : fmtC(player[CUR[c].key]);
@@ -1605,28 +1599,26 @@
             renderQuests();
             renderGearHeroSelect();
             if (currentTab === 'level') renderLevelTab();
-            if (currentTab === 'shop') renderExchange();
             renderNav();
         }
 
-        // Stat = (base + flat gain per upgrade) x (1 + 0.025 per upgrade level) x (1 + 0.5 per gear evolution), rounded.
-        // Flat gain is +1 per upgrade (+3 for HP) times the rarity's gain multiplier.
+        // Gear gives a PERCENTAGE of the equipped hero's own stat (weapons: ATK, helmets: HP, armor: DEF).
+        // bonus % = (starting % + 1 point per upgrade x rarity gain) x (1 + 50% per gear evolution). Starting % already includes rarity and zone.
         const MAX_GEAR_LEVEL = 100;
         const GEAR_EVO = { ore: 1500, gems: 20, gold: 100000 };
         function getItemStat(item, key) {
             const base = (item.stats && item.stats[key]) || 0;
             if (!base) return 0;
             const L = item.upgradeLevel || 0;
-            const flat = (key === 'maxHp' ? 3 : 1) * rarityOf(item).gainMult * (item.zoneMult || 1);
-            return Math.round((base + L * flat) * (1 + L * 0.025) * (1 + 0.5 * (item.evo || 0)));
+            return Math.round((base + L * rarityOf(item).gainMult) * (1 + 0.5 * (item.evo || 0)) * 10) / 10;
         }
 
         function getItemStatsSummary(item) {
             if (!item || !item.stats) return 'No Stats';
             const parts = [];
-            if (item.stats.atk) parts.push(`ATK +${getItemStat(item, 'atk')}`);
-            if (item.stats.def) parts.push(`DEF +${getItemStat(item, 'def')}`);
-            if (item.stats.maxHp) parts.push(`HP +${getItemStat(item, 'maxHp')}`);
+            if (item.stats.atk) parts.push(`ATK +${getItemStat(item, 'atk')}%`);
+            if (item.stats.def) parts.push(`DEF +${getItemStat(item, 'def')}%`);
+            if (item.stats.maxHp) parts.push(`HP +${getItemStat(item, 'maxHp')}%`);
             return parts.length > 0 ? parts.join(' | ') : 'Base Gear';
         }
 
@@ -1929,7 +1921,7 @@
                 <div class="grid grid-cols-3 gap-1 text-[11px] font-mono bg-slate-950 rounded-lg p-2 text-center text-slate-200">
                     <span>HP<br><b>${fmtNum(st.maxHp)}</b></span><span>ATK<br><b>${fmtNum(st.atk)}</b></span><span>DEF<br><b>${fmtNum(st.def)}</b></span>
                 </div>
-                <div class="text-[10px] text-slate-400 font-mono">Gear: ${gearCount}/4 slots${hero.type === 'support' ? ' | Raises HP healed after fights' : ''}</div>
+                <div class="text-[10px] text-slate-400 font-mono">Gear: ${gearCount}/4 slots${hero.type === 'support' ? ' | Raises HP healed after fights (max 10%)' : ''}</div>
                 <div class="grid grid-cols-2 gap-2">
                     <button onclick="togglePartyMember(${hero.id})" class="py-2 rounded-xl border text-xs font-bold ${hero.inParty ? 'bg-rose-600/20 border-rose-500/40 text-rose-300' : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'}">${hero.inParty ? 'Remove from Party' : 'Add to Party'}</button>
                     <button onclick="manageHeroGear(${hero.id})" class="py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">Manage Gear</button>
@@ -2196,7 +2188,7 @@
                     <div>
                         <div class="text-xs font-extrabold text-slate-100">Zone ${i + 1} - ${biomeOf(i).name}</div>
                         <div class="text-[10px] font-mono text-slate-400">Monsters Lvl ${fmtNum(z.minLvl)} - ${fmtNum(z.maxLvl)}</div>
-                        <div class="text-[10px] font-mono text-violet-300">Hero EXP x${zoneExpMult(i) >= 1000 ? zoneExpMult(i).toExponential(1) : zoneExpMult(i).toFixed(1)} | Gear x${fmtNum(zoneGearMult(i))}</div>
+                        <div class="text-[10px] font-mono text-violet-300">Hero EXP x${zoneExpMult(i) >= 1000 ? zoneExpMult(i).toExponential(1) : zoneExpMult(i).toFixed(1)} | Gear x${zoneStatMult(i + 1).toFixed(2)} | Gold x${zoneGoldMult(i).toFixed(2)}</div>
                     </div>
                     <button onclick="document.getElementById('map-info').classList.add('hidden')" class="text-slate-500 px-1"><i class="fa-solid fa-xmark"></i></button>
                 </div>
@@ -2224,7 +2216,7 @@
         function upgradeCostAt(item, L) {
             const rm = rarityOf(item).costMult;
             return {
-                ore: Math.ceil(2 * Math.pow(1.12, L) * rm * zoneCost(item)),
+                ore: Math.ceil(Math.pow(1.04, L) * rm * zoneCost(item)),
                 gold: Math.round(10 * Math.pow(1.15, L) * rm * (item.zoneMult || 1))
             };
         }
@@ -2304,6 +2296,7 @@
             player.materials -= cost.ore;
             player.gold -= cost.gold;
             item.upgradeLevel = (item.upgradeLevel || 0) + 1;
+            player.stats.upgrades++;
             recalculateHealthOnStatChange();
             updateUI();
         }
@@ -2388,17 +2381,17 @@
             if (!force && key === levelKey) return;
             levelKey = key;
             const need = playerExpNeeded(player.level);
-            const pct = Math.min(100, (player.exp / need) * 100);
+            const pct = player.level >= MAX_PLAYER_LEVEL ? 100 : Math.min(100, (player.exp / need) * 100);
             let h = `
                 <div class="bg-gradient-to-br from-violet-950 to-slate-900 border border-violet-800/40 rounded-2xl p-4 space-y-2">
                     <div class="flex justify-between items-center">
-                        <div class="text-sm font-extrabold text-slate-100">Player Level ${player.level}</div>
+                        <div class="text-sm font-extrabold text-slate-100">Player Level ${player.level}${player.level >= MAX_PLAYER_LEVEL ? ' (MAX)' : ''}</div>
                         <div class="text-xs font-mono font-bold text-violet-300">${player.points} Point${player.points === 1 ? '' : 's'}</div>
                     </div>
                     <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800">
                         <div class="bg-gradient-to-r from-violet-600 to-fuchsia-400 h-full" style="width:${pct}%"></div>
                     </div>
-                    <div class="text-[10px] font-mono text-slate-400 flex justify-between"><span>EXP</span><span>${player.exp} / ${need}</span></div>
+                    <div class="text-[10px] font-mono text-slate-400 flex justify-between"><span>EXP</span><span>${player.level >= MAX_PLAYER_LEVEL ? 'MAX LEVEL' : `${player.exp} / ${need}`}</span></div>
                     <div class="text-[10px] text-slate-400">Finish quests to earn Player EXP. Every level gives 1 upgrade point.</div>
                     <button onclick="openAchievements()" class="w-full mt-1 py-2 bg-amber-600/20 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-lg"><i class="fa-solid fa-trophy mr-1"></i>Achievements</button>
                 </div>
@@ -2414,7 +2407,7 @@
                     <div class="flex items-center gap-2">
                         <i class="fa-solid ${d.icon} text-base" style="color:${d.color}"></i>
                         <div>
-                            <div class="text-xs font-bold text-slate-200">${d.name} <span class="text-[10px] font-mono text-slate-400">${rank}/${d.max}</span></div>
+                            <div class="text-xs font-bold text-slate-200">${d.name} <span class="text-[10px] font-mono text-slate-400">${d.max === Infinity ? rank : `${rank}/${d.max}`}</span></div>
                             <div class="text-[10px] text-slate-400">${d.desc}</div>
                             <div class="text-[10px] font-mono text-emerald-400">Current: x${getMult(k).toFixed(2)}</div>
                         </div>
@@ -2462,7 +2455,6 @@
             document.getElementById(`tab-${tabId}`).classList.remove('hidden');
             if (tabId === 'level') renderLevelTab(true);
             if (tabId === 'map') openMap();
-            if (tabId === 'shop') renderExchange();
             renderNav(true);
         }
 
