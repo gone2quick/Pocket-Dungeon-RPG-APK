@@ -1528,7 +1528,11 @@
             });
         }
 
+        let heroesKey = '';
         function renderHeroesList() {
+            const key = JSON.stringify([partyLimit(), player.party.map(h => [h.id, h.name, h.level, h.evoLevel, h.inParty, h.rarity, getHeroStats(h)])]);
+            if (key === heroesKey) return;
+            heroesKey = key;
             const list = document.getElementById('heroes-list');
             list.innerHTML = '';
             player.party.forEach(hero => {
@@ -1553,9 +1557,10 @@
                         <span>DEF: ${st.def}</span>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="togglePartyMember(${hero.id})" class="w-full py-1.5 ${hero.inParty ? 'bg-rose-600/20 border-rose-500/40 text-rose-300' : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'} border text-xs font-bold rounded-lg">
+                        <button onclick="togglePartyMember(${hero.id})" class="flex-1 py-1.5 ${hero.inParty ? 'bg-rose-600/20 border-rose-500/40 text-rose-300' : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'} border text-xs font-bold rounded-lg">
                             ${hero.inParty ? 'Remove from Party' : 'Add to Party'}
                         </button>
+                        <button onclick="releaseHero(${hero.id})" class="shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg ${player.party.length > 1 ? 'border-slate-600 text-slate-300' : 'border-slate-800 text-slate-600'}"><i class="fa-solid fa-trash-can mr-1"></i>Release</button>
                     </div>
                 `;
                 list.appendChild(el);
@@ -1601,6 +1606,26 @@
                 `;
                 list.appendChild(el);
             });
+        }
+
+        function releaseHero(id) {
+            const h = player.party.find(x => x.id === id);
+            if (!h) return;
+            if (player.party.length <= 1) { showToast('You need to keep at least one hero.'); return; }
+            const doRelease = () => {
+                // equipped gear goes back to the backpack
+                h.equipped.weapons.concat([h.equipped.helmet, h.equipped.armor]).forEach(i => { if (i) player.inventory.push(i); });
+                player.party = player.party.filter(x => x.id !== id);
+                if (player.gearHeroId === id) player.gearHeroId = null;
+                // never leave the party empty
+                if (!player.party.some(x => x.inParty)) player.party[0].inParty = true;
+                recalculateHealthOnStatChange();
+                showToast(`Released ${h.name}`);
+                updateUI();
+            };
+            const valuable = (h.rarity || 0) >= 2 || h.level > 1 || h.evoLevel > 0;
+            if (!valuable) { doRelease(); return; }
+            askConfirm(`Release ${h.name} (${heroRarity(h).label}, Lvl ${h.level}${h.evoLevel ? `, Evo ${h.evoLevel}` : ''})? This can't be undone. Any equipped gear goes back to your backpack.`, doRelease, { yes: 'Release' });
         }
 
         function togglePartyMember(heroId) {
