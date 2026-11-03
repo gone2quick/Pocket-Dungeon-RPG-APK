@@ -271,7 +271,7 @@
                 </div>
             </div>
 
-            <div class="text-xs text-slate-400">Upgrade backpack or equipped gear with Ore and Gold. The price climbs with every upgrade and with rarity. Recycle spare gear in the Gear tab to get more Ore. Gear gives a % of the equipped hero's own stats. Each upgrade adds +1% (more for rarer gear). Gear upgrades max out at +100, then the button becomes Evolve (1,500 Ore, 20 gems, 100,000 gold): +50% of base stats per evolution, and the upgrade level resets.</div>
+            <div class="text-xs text-slate-400">Upgrade backpack or equipped gear with Ore and Gold. The price climbs with every upgrade and with rarity. Recycle spare gear in the Gear tab to get more Ore. Gear gives a % of the equipped hero's own stats. Each upgrade adds +10% of the item's starting stat. Gear upgrades max out at +100, then the button becomes Evolve (1,500 Ore, 20 gems, 100,000 gold): +50% of base stats per evolution, and the upgrade level resets.</div>
             <div id="forge-list" class="space-y-2">
                 <!-- Items available for upgrading -->
             </div>
@@ -1508,9 +1508,10 @@
             gems: { key: 'gems', label: 'Gems', icon: 'fa-gem', color: '#22d3ee' }
         };
         function gcd(a, b) { return b ? gcd(b, a % b) : a; }
-        // Prices (in gold) grow with the highest zone you have unlocked. A gem is always 625 Ore.
-        function orePrice() { return Math.max(1, Math.round(2 * zoneGearMult(player.maxZoneIdx))); }
-        function exPrice(c) { return c === 'gold' ? 1 : c === 'ore' ? orePrice() : orePrice() * 625; }
+        // Fixed prices, in gold: 1 Ore = 25g, 1 Gem = 10,000g (so 1 Gem = 400 Ore). They never change.
+        const ORE_PRICE = 25, GEM_PRICE = 10000;
+        function orePrice() { return ORE_PRICE; }
+        function exPrice(c) { return c === 'gold' ? 1 : c === 'ore' ? ORE_PRICE : GEM_PRICE; }
         let exPay = 'gold', exBuilt = false;
         const exQty = {};
 
@@ -1522,6 +1523,13 @@
         function exTargets() { return Object.keys(CUR).filter(c => c !== exPay); }
         function exGetQty(t) { return exQty[exPay + '>' + t] || 1; }
         function exSet(t, n) { exQty[exPay + '>' + t] = Math.max(1, Math.min(1e9, Math.floor(n))); updateExchange(); }
+        // Typing an amount of what you want to receive; it rounds down to whole trades (the summary line shows the exact result)
+        function exTyped(t, raw) {
+            const amount = parseInt(String(raw).replace(/[^0-9]/g, ''), 10) || 0;
+            const get = exRate(exPay, t).get;
+            exQty[exPay + '>' + t] = Math.max(1, Math.min(1e9, Math.floor(amount / get)));
+            updateExchange();
+        }
         function exAdj(t, d) { exSet(t, exGetQty(t) + d); }
         function exMax(t) { return Math.max(1, Math.floor(player[CUR[exPay].key] / exRate(exPay, t).pay)); }
         function setExPay(c) { exPay = c; buildExchange(); }
@@ -1563,7 +1571,11 @@
                     </div>
                     <div class="flex items-center gap-1.5">
                         <button onclick="exAdj('${t}', -1)" class="w-7 h-7 rounded-lg border border-slate-700 text-slate-300 font-bold">-</button>
-                        <span id="ex-qty-${t}" class="min-w-[2.5rem] text-center text-xs font-mono font-bold text-slate-100">1</span>
+                        <input id="ex-qty-${t}" type="text" inputmode="numeric" autocomplete="off" value="1"
+                            onfocus="this.value = exGetQty('${t}') * exRate(exPay, '${t}').get; this.select()"
+                            oninput="exTyped('${t}', this.value)"
+                            onblur="this.value = fmtNum(exGetQty('${t}') * exRate(exPay, '${t}').get)"
+                            class="select-text w-24 text-center bg-slate-900 border border-slate-700 rounded-lg py-1 text-xs font-mono font-bold text-slate-100 focus:outline-none focus:border-cyan-500">
                         <button onclick="exAdj('${t}', 1)" class="w-7 h-7 rounded-lg border border-slate-700 text-slate-300 font-bold">+</button>
                         <button onclick="exAdj('${t}', 10)" class="px-2 h-7 rounded-lg border border-slate-700 text-slate-300 text-[10px] font-bold">+10</button>
                         <button onclick="exSet('${t}', exMax('${t}'))" class="px-2 h-7 rounded-lg border border-slate-700 text-slate-300 text-[10px] font-bold">Max</button>
@@ -1586,7 +1598,7 @@
                 const r = exRate(exPay, t), n = exGetQty(t), cost = r.pay * n, gain = r.get * n;
                 const q = document.getElementById('ex-qty-' + t), sum = document.getElementById('ex-sum-' + t), go = document.getElementById('ex-go-' + t);
                 if (!q) return;
-                q.innerText = fmtNum(n);
+                if (document.activeElement !== q) q.value = fmtNum(n * r.get);   // don't overwrite what you are typing
                 sum.innerText = `Pay ${fmtNum(cost)} ${CUR[exPay].label} -> Get ${fmtNum(gain)} ${CUR[t].label}`;
                 go.className = `ml-auto px-3 h-7 rounded-lg text-xs font-bold ${player[CUR[exPay].key] >= cost ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'}`;
             });
@@ -1660,14 +1672,15 @@
         }
 
         // Gear gives a PERCENTAGE of the equipped hero's own stat (weapons: ATK, helmets: HP, armor: DEF).
-        // bonus % = (starting % + 1 point per upgrade x rarity gain) x (1 + 50% per gear evolution). Starting % already includes rarity and zone.
+        // bonus % = starting % x (1 + 10% per upgrade) x (1 + 50% per gear evolution). Starting % already includes rarity and zone.
         const MAX_GEAR_LEVEL = 100;
+        const UPGRADE_STEP = 0.10;   // each upgrade adds 10% of the item's starting stat
         const GEAR_EVO = { ore: 1500, gems: 20, gold: 100000 };
         function getItemStat(item, key) {
             const base = (item.stats && item.stats[key]) || 0;
             if (!base) return 0;
             const L = item.upgradeLevel || 0;
-            return Math.round((base + L * rarityOf(item).gainMult) * (1 + 0.5 * (item.evo || 0)) * 100) / 100;
+            return Math.round(base * (1 + L * UPGRADE_STEP) * (1 + 0.5 * (item.evo || 0)) * 100) / 100;
         }
 
         function getItemStatsSummary(item) {
