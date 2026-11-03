@@ -1523,11 +1523,10 @@
         function exTargets() { return Object.keys(CUR).filter(c => c !== exPay); }
         function exGetQty(t) { return exQty[exPay + '>' + t] || 1; }
         function exSet(t, n) { exQty[exPay + '>' + t] = Math.max(1, Math.min(1e9, Math.floor(n))); updateExchange(); }
-        // Typing an amount of what you want to receive; it rounds down to whole trades (the summary line shows the exact result)
+        // The box counts units: 1 unit = one trade (the summary line spells out exactly what is paid and received). It starts at 1.
         function exTyped(t, raw) {
-            const amount = parseInt(String(raw).replace(/[^0-9]/g, ''), 10) || 0;
-            const get = exRate(exPay, t).get;
-            exQty[exPay + '>' + t] = Math.max(1, Math.min(1e9, Math.floor(amount / get)));
+            const n = parseInt(String(raw).replace(/[^0-9]/g, ''), 10) || 0;
+            exQty[exPay + '>' + t] = Math.max(1, Math.min(1e9, n));
             updateExchange();
         }
         function exAdj(t, d) { exSet(t, exGetQty(t) + d); }
@@ -1572,12 +1571,11 @@
                     <div class="flex items-center gap-1.5">
                         <button onclick="exAdj('${t}', -1)" class="w-7 h-7 rounded-lg border border-slate-700 text-slate-300 font-bold">-</button>
                         <input id="ex-qty-${t}" type="text" inputmode="numeric" autocomplete="off" value="1"
-                            onfocus="this.value = exGetQty('${t}') * exRate(exPay, '${t}').get; this.select()"
+                            onfocus="this.value = exGetQty('${t}'); this.select()"
                             oninput="exTyped('${t}', this.value)"
-                            onblur="this.value = fmtNum(exGetQty('${t}') * exRate(exPay, '${t}').get)"
+                            onblur="this.value = fmtNum(exGetQty('${t}'))"
                             class="select-text w-24 text-center bg-slate-900 border border-slate-700 rounded-lg py-1 text-xs font-mono font-bold text-slate-100 focus:outline-none focus:border-cyan-500">
                         <button onclick="exAdj('${t}', 1)" class="w-7 h-7 rounded-lg border border-slate-700 text-slate-300 font-bold">+</button>
-                        <button onclick="exAdj('${t}', 10)" class="px-2 h-7 rounded-lg border border-slate-700 text-slate-300 text-[10px] font-bold">+10</button>
                         <button onclick="exSet('${t}', exMax('${t}'))" class="px-2 h-7 rounded-lg border border-slate-700 text-slate-300 text-[10px] font-bold">Max</button>
                         <button id="ex-go-${t}" onclick="exTrade('${t}')" class="ml-auto px-3 h-7 rounded-lg text-xs font-bold">Exchange</button>
                     </div>`;
@@ -1598,7 +1596,7 @@
                 const r = exRate(exPay, t), n = exGetQty(t), cost = r.pay * n, gain = r.get * n;
                 const q = document.getElementById('ex-qty-' + t), sum = document.getElementById('ex-sum-' + t), go = document.getElementById('ex-go-' + t);
                 if (!q) return;
-                if (document.activeElement !== q) q.value = fmtNum(n * r.get);   // don't overwrite what you are typing
+                if (document.activeElement !== q) q.value = fmtNum(n);   // don't overwrite what you are typing
                 sum.innerText = `Pay ${fmtNum(cost)} ${CUR[exPay].label} -> Get ${fmtNum(gain)} ${CUR[t].label}`;
                 go.className = `ml-auto px-3 h-7 rounded-lg text-xs font-bold ${player[CUR[exPay].key] >= cost ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'}`;
             });
