@@ -522,6 +522,7 @@
             activeZoneIndex: 0,
             level: 1,
             bestHeroLevel: 1,
+            rebirths: 0,
             maxZoneIdx: 0,
             lastActive: 0,
             wasRunning: false,
@@ -592,7 +593,7 @@
                 maxLevel: 100,
                 evoLevel: 0,
                 exp: 0,
-                maxExp: 50,
+                maxExp: heroExpNeeded(1),
                 inParty: true,
                 equipped: { weapons: [null, null], helmet: null, armor: null }
             };
@@ -642,8 +643,13 @@
             });
             return Math.min(0.1, pct);
         }
-        // Zone scaling: hero EXP grows 1.2x per zone; gear stats grow with the zone's monster level
-        function zoneExpMult(i) { return Math.pow(1.3, i); }
+        // Zone scaling: enemy EXP follows the hero level curve (see heroExpNeeded); gold and gear scale with the zone
+        const KILLS_PER_LEVEL = 10;
+        function heroExpNeeded(level) { return Math.round(50 * level * level); }
+        function avgExpPerKill(zi) {
+            const z = mapZones[zi];
+            return heroExpNeeded(z.minLvl + 0.31 * (z.maxLvl - z.minLvl)) / KILLS_PER_LEVEL;
+        }
         function zoneGoldMult(i) { return 1 + 0.25 * i; }
         function zoneGearMult(i) { const z = mapZones[Math.min(Math.max(i, 0), mapZones.length - 1)]; return 1 + (z.minLvl - 1) * 0.1; }
         function zoneStatMult(zone) { return 1 + 0.05 * (zone - 1); }   // zone is 1-based; higher zones roll a higher starting %
@@ -692,7 +698,7 @@
                 maxHp: hp,
                 atk: atk,
                 goldReward: Math.round((5 + (eLvl * 3)) * (guardian ? 5 : 1) * zoneGoldMult(zIdx)),
-                expReward: (10 + (eLvl * 4)) * (guardian ? 3 : 1),
+                expReward: Math.max(1, heroExpNeeded(eLvl) / KILLS_PER_LEVEL) * (guardian ? 3 : 1),
                 isGuardian: guardian
             };
 
@@ -771,10 +777,10 @@
             if (currentEnemy.hp <= 0) {
                 currentEnemy.hp = 0;
                 const loot = getMult('loot');
-                const gold = Math.round(currentEnemy.goldReward * loot);
+                const gold = Math.round(currentEnemy.goldReward * loot * rebirthGoldMult());
                 player.runKills++;
                 player.stats.kills++;
-                if (player.stats.kills % 10 === 0) addPlayerExp(1);
+                if (player.stats.kills % 10 === 0) addPlayerExp(Math.round(rebirthExpMult()));
                 player.gold += gold;
                 player.runGold += gold;
                 logMessage(`Slain ${currentEnemy.name}! Gained ${gold}g.`);
@@ -797,11 +803,11 @@
 
                 const expMult = getMult('heroExp');
                 player.party.filter(h => h.inParty).forEach(h => {
-                    h.exp += Math.round(currentEnemy.expReward * Math.pow(1.5, h.evoLevel) * expMult * zoneExpMult(player.activeZoneIndex));
+                    h.exp += Math.round(currentEnemy.expReward * Math.pow(1.5, h.evoLevel) * expMult * rebirthExpMult());
                     while (h.exp >= h.maxExp && h.level < h.maxLevel) {
                         h.level++;
                         h.exp -= h.maxExp;
-                        h.maxExp = Math.round(h.maxExp * 1.25);
+                        h.maxExp = heroExpNeeded(h.level);
                         logMessage(`${h.name} leveled up to Lvl ${h.level}!`);
                         checkQuestProgress('level', 1);
                     }
@@ -1068,7 +1074,7 @@
             hero.level = 1;
             hero.maxLevel += 100;
             hero.exp = 0;
-            hero.maxExp = 50;
+            hero.maxExp = heroExpNeeded(1);
 
             recalculateHealthOnStatChange();
             updateUI();
@@ -1105,13 +1111,17 @@
         }
 
         /* ---- Player levels ---- */
-        const MAX_PLAYER_LEVEL = 100;
+        // Player level cap: 100, plus 100 for every rebirth. Each rebirth doubles EXP (player and hero) and quadruples gold, stacking.
+        function playerMaxLevel() { return 100 * ((player.rebirths || 0) + 1); }
+        function rebirthExpMult() { return Math.pow(2, player.rebirths || 0); }
+        function rebirthGoldMult() { return Math.pow(4, player.rebirths || 0); }
+        const fmtBig = n => n >= 1e9 ? n.toExponential(2) : fmtNum(n);
         function playerExpNeeded(l) { return Math.round(40 * Math.pow(l, 1.4)); }
 
         function addPlayerExp(n) {
-            if (player.level >= MAX_PLAYER_LEVEL) { player.exp = 0; return; }
+            if (player.level >= playerMaxLevel()) { player.exp = 0; return; }
             player.exp += n;
-            while (player.level < MAX_PLAYER_LEVEL && player.exp >= playerExpNeeded(player.level)) {
+            while (player.level < playerMaxLevel() && player.exp >= playerExpNeeded(player.level)) {
                 player.exp -= playerExpNeeded(player.level);
                 player.level++;
                 player.points++;
@@ -1119,7 +1129,7 @@
                 showToast(`Player Level ${player.level}!` + (f ? ` Unlocked: ${f}` : ' +1 point'));
                 logMessage(`Player reached Level ${player.level}!`);
             }
-            if (player.level >= MAX_PLAYER_LEVEL) player.exp = 0;
+            if (player.level >= playerMaxLevel()) player.exp = 0;
         }
 
         function buyUpgrade(key) {
@@ -1150,7 +1160,7 @@
         function avgGoldPerKill(zi) {
             const z = mapZones[Math.min(zi, mapZones.length - 1)];
             const lvl = z.minLvl + 0.31 * (z.maxLvl - z.minLvl);   // enemies lean toward the low end of a zone
-            return (5 + 3 * lvl) * zoneGoldMult(zi);
+            return (5 + 3 * lvl) * zoneGoldMult(zi) * rebirthGoldMult();
         }
         function questTarget(type, ti) {
             const base = questTypes[type].targets[ti], zi = player.maxZoneIdx;
@@ -1168,7 +1178,7 @@
                     id: Date.now() + i, type, target, current: 0, claimed: false,
                     text: questTypes[type].text(target),
                     tier: tier.tier, reward: tier.gems,
-                    exp: Math.round(playerExpNeeded(player.level) * tier.pct)
+                    exp: Math.round(playerExpNeeded(player.level) * tier.pct * rebirthExpMult())
                 };
             });
             player.questRefreshAt = Date.now() + QUEST_MS;
@@ -1261,6 +1271,7 @@
                 }
                 player.party.forEach(h => {
                     if (h.rarity === undefined) h.rarity = 0;
+                    h.maxExp = heroExpNeeded(h.level);
                     if (/^(Defender|Striker|Support) \d+$/.test(h.name)) h.name = randomHeroName();
                 });
                 if (!shopInventory.length || shopInventory.some(i => (i.zone || 1) < player.maxZoneIdx + 1)) shopInventory = makeShopStock();
@@ -1306,7 +1317,7 @@
         }
 
         // Player EXP for finishing a tier: 10% of the current level's requirement, +3% per tier, up to 50%
-        function achExp(tier) { return Math.round(playerExpNeeded(player.level) * Math.min(0.5, 0.1 + 0.03 * tier)); }
+        function achExp(tier) { return Math.round(playerExpNeeded(player.level) * Math.min(0.5, 0.1 + 0.03 * tier) * rebirthExpMult()); }
 
         // When a tier is completed, that achievement moves on to its next tier (with a small gem reward)
         function checkAchievements() {
@@ -1406,6 +1417,48 @@
             player.stats.itemsObtained += n;
             askConfirm(`<div class="text-sm font-bold mb-1">Welcome back!</div>You were away for ${fmtDur(sec)}.<br>Offline gains (1/3 of normal): <b>+${fmtNum(gold)}g</b>, <b>+${fmtNum(ore)} Ore</b>, <b>+${n} item${n === 1 ? '' : 's'}</b>`, null, { single: true, yes: 'Nice!' });
             logMessage(`Offline gains: +${fmtNum(gold)}g, +${fmtNum(ore)} Ore, +${n} items`);
+        }
+
+        /* ================= REBIRTH ================= */
+        function rebirth() {
+            if (player.level < playerMaxLevel()) return;
+            const n = (player.rebirths || 0) + 1;
+            askConfirm(`<div class="text-sm font-bold mb-1 text-fuchsia-300">Rebirth #${n}</div>
+                <div class="text-[11px] text-slate-300 mb-2">Everything resets: player level and upgrades, heroes, gear, gold, gems, Ore, zones and quests. You keep your achievements and stats.</div>
+                <div class="text-[11px] text-emerald-300">New bonuses: EXP (player and hero) x${fmtBig(Math.pow(2, n))}, Gold x${fmtBig(Math.pow(4, n))}.<br>Player level cap rises to ${100 * (n + 1)}.</div>`,
+                doRebirth, { yes: 'Rebirth' });
+        }
+
+        function doRebirth() {
+            if (player.level < playerMaxLevel()) return;
+            if (isRunning) stopRun();
+            player.rebirths = (player.rebirths || 0) + 1;
+            Object.assign(player, {
+                gold: 50, gems: 10, materials: 5,
+                activeZoneIndex: 0, maxZoneIdx: 0, bestHeroLevel: 1,
+                level: 1, exp: 0, points: 0, upgrades: { loot: 0, heroExp: 0, speed: 0 },
+                gearHeroId: null, inventory: [], party: [], quests: [],
+                runsCount: 0, runKills: 0, runGold: 0, currentHp: null,
+                offlineRate: { gold: 0, ore: 0, items: 0 }, lastActive: 0, wasRunning: false,
+                devMode: false, devBackup: null
+            });
+            heroIdCounter = 1;
+            rerollCost = 25;
+            income.sec = income.gold = income.ore = income.items = 0;
+            player.party.push(createHero('defensive'));
+            player.party.push(createHero('offensive'));
+            player.inventory.push(generateRandomItem());
+            shopInventory = makeShopStock();
+            generateQuests();
+            heroSelected.clear(); selectedIds.clear(); heroSelectMode = false; selectMode = false;
+            heroesKey = ''; invKey = ''; forgeKey = ''; questsKey = ''; levelKey = ''; navKey = '';
+            spawnEnemy(true);
+            player.currentHp = getTeamStats().maxHp;
+            switchTab('battle');
+            saveGame();
+            showToast(`Rebirth #${player.rebirths}! EXP x${fmtBig(rebirthExpMult())}, Gold x${fmtBig(rebirthGoldMult())}. Level cap ${playerMaxLevel()}.`);
+            logMessage(`Rebirth #${player.rebirths} complete.`);
+            updateUI();
         }
 
         /* ================= SECRET DEV MODE ================= */
@@ -1715,7 +1768,7 @@
             const items = getSelectedItems();
             if (!items.length) return;
             confirmRisky(items, 'Recycle', () => {
-                const ore = items.reduce((sum, i) => sum + recycleValue(i), 0);
+                const ore = recycleTotal(items);
                 player.materials += ore;
                 showToast(`Recycled ${items.length} item${items.length === 1 ? '' : 's'} for ${fmtNum(ore)} Ore`);
                 finishBulk(items);
@@ -1745,7 +1798,7 @@
             if (selectMode) {
                 const sel = getSelectedItems();
                 const sellTotal = sel.reduce((sum, i) => sum + sellValue(i), 0);
-                const oreTotal = sel.reduce((sum, i) => sum + recycleValue(i), 0);
+                const oreTotal = recycleTotal(sel);
                 const sb = document.getElementById('btn-bulk-sell');
                 const rb = document.getElementById('btn-bulk-recycle');
                 sb.innerHTML = sel.length ? `Sell ${sel.length}<br><span class="text-[9px] font-normal">+${fmtNum(sellTotal)}g</span>` : 'Sell';
@@ -2188,7 +2241,7 @@
                     <div>
                         <div class="text-xs font-extrabold text-slate-100">Zone ${i + 1} - ${biomeOf(i).name}</div>
                         <div class="text-[10px] font-mono text-slate-400">Monsters Lvl ${fmtNum(z.minLvl)} - ${fmtNum(z.maxLvl)}</div>
-                        <div class="text-[10px] font-mono text-violet-300">Hero EXP x${zoneExpMult(i) >= 1000 ? zoneExpMult(i).toExponential(1) : zoneExpMult(i).toFixed(1)} | Gear x${zoneStatMult(i + 1).toFixed(2)} | Gold x${zoneGoldMult(i).toFixed(2)}</div>
+                        <div class="text-[10px] font-mono text-violet-300">~${fmtC(avgExpPerKill(i))} hero EXP/kill | Gear x${zoneStatMult(i + 1).toFixed(2)} | Gold x${zoneGoldMult(i).toFixed(2)}</div>
                     </div>
                     <button onclick="document.getElementById('map-info').classList.add('hidden')" class="text-slate-500 px-1"><i class="fa-solid fa-xmark"></i></button>
                 </div>
@@ -2237,8 +2290,10 @@
 
         // Selling: half the item's value in gold, plus half the gold spent on upgrades
         function sellValue(item) { return Math.round(item.value * 0.5) + Math.floor(getSpent(item).gold * 0.5); }
-        // Recycling: Forge Ore based on rarity, plus half the Ore spent on upgrades
-        function recycleValue(item) { return Math.max(1, Math.round(2 * rarityOf(item).costMult * zoneCost(item))) + Math.floor(getSpent(item).ore * 0.5); }
+        // Recycling: you get the Ore you would get by exchanging the item's sell price (gold -> Ore at the current exchange price).
+        // For several items the sell prices are added up first, then exchanged once.
+        function recycleTotal(items) { return Math.floor(items.reduce((sum, i) => sum + sellValue(i), 0) / orePrice()); }
+        function recycleValue(item) { return recycleTotal([item]); }
 
         function getAllGear() {
             const out = player.inventory.map(item => ({ item, owner: null }));
@@ -2377,23 +2432,25 @@
 
         let levelKey = '';
         function renderLevelTab(force) {
-            const key = JSON.stringify([player.level, player.exp, player.points, player.upgrades, player.devMode]);
+            const key = JSON.stringify([player.level, player.exp, player.points, player.upgrades, player.devMode, player.rebirths]);
             if (!force && key === levelKey) return;
             levelKey = key;
             const need = playerExpNeeded(player.level);
-            const pct = player.level >= MAX_PLAYER_LEVEL ? 100 : Math.min(100, (player.exp / need) * 100);
+            const pct = player.level >= playerMaxLevel() ? 100 : Math.min(100, (player.exp / need) * 100);
             let h = `
                 <div class="bg-gradient-to-br from-violet-950 to-slate-900 border border-violet-800/40 rounded-2xl p-4 space-y-2">
                     <div class="flex justify-between items-center">
-                        <div class="text-sm font-extrabold text-slate-100">Player Level ${player.level}${player.level >= MAX_PLAYER_LEVEL ? ' (MAX)' : ''}</div>
+                        <div class="text-sm font-extrabold text-slate-100">Player Level ${player.level}${player.level >= playerMaxLevel() ? ' (MAX)' : ''}</div>
                         <div class="text-xs font-mono font-bold text-violet-300">${player.points} Point${player.points === 1 ? '' : 's'}</div>
                     </div>
                     <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800">
                         <div class="bg-gradient-to-r from-violet-600 to-fuchsia-400 h-full" style="width:${pct}%"></div>
                     </div>
-                    <div class="text-[10px] font-mono text-slate-400 flex justify-between"><span>EXP</span><span>${player.level >= MAX_PLAYER_LEVEL ? 'MAX LEVEL' : `${player.exp} / ${need}`}</span></div>
+                    <div class="text-[10px] font-mono text-slate-400 flex justify-between"><span>EXP</span><span>${player.level >= playerMaxLevel() ? 'MAX LEVEL' : `${player.exp} / ${need}`}</span></div>
                     <div class="text-[10px] text-slate-400">Finish quests to earn Player EXP. Every level gives 1 upgrade point.</div>
                     <button onclick="openAchievements()" class="w-full mt-1 py-2 bg-amber-600/20 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-lg"><i class="fa-solid fa-trophy mr-1"></i>Achievements</button>
+                    <div class="text-[10px] font-mono text-slate-400 text-center">Rebirths: ${player.rebirths || 0} | EXP x${fmtBig(rebirthExpMult())} | Gold x${fmtBig(rebirthGoldMult())} | Level cap ${playerMaxLevel()}</div>
+                    ${player.level >= playerMaxLevel() ? '<button onclick="rebirth()" class="w-full py-2.5 rounded-lg bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white font-extrabold text-sm shadow-lg shadow-fuchsia-950"><i class="fa-solid fa-arrows-rotate mr-1.5"></i>Rebirth</button>' : ''}
                 </div>
                 <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Upgrades</h3>`;
             Object.keys(upgradeDefs).forEach(k => {
