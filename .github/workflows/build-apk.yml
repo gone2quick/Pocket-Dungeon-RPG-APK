@@ -27,6 +27,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Bundle Tailwind, icons and fonts for offline play
+        continue-on-error: true
+        run: node scripts/make-offline.js
+
       - name: Create Android project and copy game files
         run: |
           npx cap add android
@@ -104,14 +108,21 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
+      - name: Name the APK after the version in package.json
+        run: |
+          VN=$(node -p "require('./package.json').version")
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist/Pocket-Dungeon-v${VN}.apk"
+          echo "VERSION=$VN" >> "$GITHUB_ENV"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pocket-dungeon-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Pocket-Dungeon-v${{ env.VERSION }}
+          path: dist/Pocket-Dungeon-v${{ env.VERSION }}.apk
 
       - name: Attach APK to release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: dist/Pocket-Dungeon-v${{ env.VERSION }}.apk
