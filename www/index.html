@@ -472,11 +472,11 @@
             } else {
                 it.rarity = rarityDefs[it.rarity.tier] || rarityDefs[0];
             }
-            if (it.v !== 2) {   // older gear had flat stats: rebuild them as a % from type, rarity and zone
+            if (it.v !== 3) {   // older gear: rebuild its starting % from type, rarity and zone
                 const key = it.type === 'weapons' ? 'atk' : it.type === 'helmet' ? 'maxHp' : 'def';
-                const basePct = it.type === 'weapons' ? (/Dagger/.test(it.name) ? 6 : 10) : 10;
-                it.stats = { [key]: Math.round(basePct * it.rarity.startMult * zoneStatMult(it.zone || 1) * 10) / 10 };
-                it.v = 2;
+                const top = it.type === 'weapons' ? (/Dagger/.test(it.name) ? 3 : 5) : 5;
+                it.stats = { [key]: startPct(top, it.rarity, it.zone || 1) };
+                it.v = 3;
             }
             return it;
         }
@@ -652,6 +652,10 @@
         }
         function zoneGoldMult(i) { return 1 + 0.25 * i; }
         function zoneGearMult(i) { const z = mapZones[Math.min(Math.max(i, 0), mapZones.length - 1)]; return 1 + (z.minLvl - 1) * 0.1; }
+        // Starting % of a piece of gear: the zone-1 mythical value, scaled down for lower rarities and up for higher zones
+        function startPct(topValue, rarity, zone) {
+            return Math.round(topValue * (rarity.startMult / rarityDefs[rarityDefs.length - 1].startMult) * zoneStatMult(zone) * 100) / 100;
+        }
         function zoneStatMult(zone) { return 1 + 0.05 * (zone - 1); }   // zone is 1-based; higher zones roll a higher starting %
         function zoneCost(item) { return 1 + 0.5 * ((item.zone || 1) - 1); }
         function unlockNextZone() {
@@ -873,16 +877,16 @@
 
         function generateRandomItem(zoneIdx = 0) {
             const types = [
-                { type: 'weapons', name: 'Shortsword', icon: 'fa-sword', stats: { atk: 10 } },
-                { type: 'weapons', name: 'Dagger', icon: 'fa-bolt', stats: { atk: 6 } },
-                { type: 'helmet', name: 'Cap', icon: 'fa-hat-wizard', stats: { maxHp: 10 } },   // starting % of the hero's stat
-                { type: 'armor', name: 'Tunic', icon: 'fa-shirt', stats: { def: 10 } }
+                { type: 'weapons', name: 'Shortsword', icon: 'fa-sword', stats: { atk: 5 } },   // stat values = what a MYTHICAL item gives in zone 1
+                { type: 'weapons', name: 'Dagger', icon: 'fa-bolt', stats: { atk: 3 } },
+                { type: 'helmet', name: 'Cap', icon: 'fa-hat-wizard', stats: { maxHp: 5 } },
+                { type: 'armor', name: 'Tunic', icon: 'fa-shirt', stats: { def: 5 } }
             ];
             const base = types[Math.floor(Math.random() * types.length)];
             const rarity = rollRarity();
             const zMult = zoneGearMult(zoneIdx);
             const stats = {};
-            Object.keys(base.stats).forEach(k => { stats[k] = Math.round(base.stats[k] * rarity.startMult * zoneStatMult(zoneIdx + 1) * 10) / 10; });
+            Object.keys(base.stats).forEach(k => { stats[k] = startPct(base.stats[k], rarity, zoneIdx + 1); });
 
             return {
                 id: Date.now() + Math.random(),
@@ -893,7 +897,7 @@
                 zone: zoneIdx + 1,
                 zoneMult: zMult,
                 stats: stats,
-                v: 2,
+                v: 3,
                 value: Math.round(15 * rarity.costMult * zMult),
                 upgradeLevel: 0
             };
@@ -1663,7 +1667,7 @@
             const base = (item.stats && item.stats[key]) || 0;
             if (!base) return 0;
             const L = item.upgradeLevel || 0;
-            return Math.round((base + L * rarityOf(item).gainMult) * (1 + 0.5 * (item.evo || 0)) * 10) / 10;
+            return Math.round((base + L * rarityOf(item).gainMult) * (1 + 0.5 * (item.evo || 0)) * 100) / 100;
         }
 
         function getItemStatsSummary(item) {
@@ -2269,8 +2273,8 @@
         function upgradeCostAt(item, L) {
             const rm = rarityOf(item).costMult;
             return {
-                ore: Math.ceil(Math.pow(1.04, L) * rm * zoneCost(item)),
-                gold: Math.round(10 * Math.pow(1.15, L) * rm * (item.zoneMult || 1))
+                ore: Math.ceil(Math.pow(1.03, L) * rm * zoneCost(item)),
+                gold: Math.round(10 * Math.pow(1.07, L) * rm * (item.zoneMult || 1))
             };
         }
 
