@@ -138,11 +138,6 @@
                     <!-- Dynamic mini heroes -->
                 </div>
             </div>
-
-            <!-- LOG BOX -->
-            <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 h-24 overflow-y-auto font-mono text-[11px] text-slate-400 space-y-1 no-scrollbar" id="combat-log">
-                <div class="text-slate-500 italic">Press "Start AFK Run" to begin combat.</div>
-            </div>
         </section>
 
         <!-- 2. HEROES / PARTY TAB -->
@@ -193,7 +188,7 @@
                     <i class="fa-solid fa-dna"></i>
                 </div>
                 <h3 class="font-extrabold text-sm text-slate-100">Hero Evolution Altar</h3>
-                <p class="text-[11px] text-slate-400">Evolve a Lvl 100 Hero to transcend its limits. Costs 10 gems plus gold (1,000,000 x the evolution you are moving to).</p>
+                <p class="text-[11px] text-slate-400">Evolve a hero that has reached its max level to transcend its limits (max level goes up by 100 each time). Costs 10 gems plus gold (1,000,000 x the evolution you are moving to).</p>
             </div>
 
             <div id="evolution-list" class="space-y-3">
@@ -807,7 +802,7 @@
 
                 const expMult = getMult('heroExp');
                 player.party.filter(h => h.inParty).forEach(h => {
-                    h.exp += Math.round(currentEnemy.expReward * Math.pow(1.5, h.evoLevel) * expMult * rebirthExpMult());
+                    h.exp += Math.round(currentEnemy.expReward * expMult * rebirthExpMult());
                     while (h.exp >= h.maxExp && h.level < h.maxLevel) {
                         h.level++;
                         h.exp -= h.maxExp;
@@ -1068,7 +1063,7 @@
 
         function evolveHero(heroId) {
             const hero = player.party.find(h => h.id === heroId);
-            if (!hero || hero.level < 100) return;
+            if (!hero || hero.level < hero.maxLevel) return;
             const cost = 1000000 * (hero.evoLevel + 1);
             if (player.gold < cost || player.gems < EVOLVE_GEMS) return;
 
@@ -1998,18 +1993,22 @@
                 </div>`;
         }
 
+        let evoKey = '';
         function renderEvolutionTab() {
             const list = document.getElementById('evolution-list');
+            const eligible = player.party.filter(h => h.level >= h.maxLevel);
+            // only redraw when something changed so taps are not lost
+            const key = JSON.stringify(eligible.map(h => [h.id, h.name, h.evoLevel, h.level, h.maxLevel, player.gold >= 1000000 * (h.evoLevel + 1) && player.gems >= EVOLVE_GEMS]));
+            if (key === evoKey) return;
+            evoKey = key;
             list.innerHTML = '';
 
-            const lvl100Heroes = player.party.filter(h => h.level >= 100);
-
-            if (lvl100Heroes.length === 0) {
-                list.innerHTML = '<div class="text-center text-xs text-slate-500 py-6">No Level 100 Heroes ready for evolution.</div>';
+            if (eligible.length === 0) {
+                list.innerHTML = '<div class="text-center text-xs text-slate-500 py-6">No heroes at their max level yet.</div>';
                 return;
             }
 
-            lvl100Heroes.forEach(hero => {
+            eligible.forEach(hero => {
                 const arch = heroArchetypes[hero.type];
                 const evoCost = 1000000 * (hero.evoLevel + 1);
 
@@ -2031,7 +2030,7 @@
                                 <span class="text-[10px] text-amber-400 ml-1">Evo ${hero.evoLevel} -> ${hero.evoLevel + 1}</span>
                             </div>
                         </div>
-                        <span class="text-xs font-mono font-bold text-emerald-400">READY (Lvl 100)</span>
+                        <span class="text-xs font-mono font-bold text-emerald-400">READY (Lvl ${hero.maxLevel})</span>
                     </div>
                     ${actionHtml}
                 `;
@@ -2530,14 +2529,8 @@
             renderNav(true);
         }
 
-function logMessage(msg) {
-            const log = document.getElementById('combat-log');
-            if (!log) return;
-            const entry = document.createElement('div');
-            entry.innerText = msg;
-            log.appendChild(entry);
-            log.scrollTop = log.scrollHeight;
-        }
+// The on-screen combat log was removed (it slowed the game down). Calls to logMessage are kept but do nothing.
+        function logMessage(msg) {}
 
         function spawnDamagePop(dmg, isPlayer) {
             const container = document.getElementById('damage-container');
